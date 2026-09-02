@@ -43,12 +43,12 @@ to force-push something and watch it get refused and pick another route.
 **Situation.** Claude wrote the feature. Asking the same session to review
 it is like asking someone to grade their own homework.
 
-**Do this.** Define a reviewer subagent in `.claude/agents/reviewer.md`:
+**Do this.** Define a reviewer subagent in `.claude/agents/rex.md`:
 
 ```markdown
 ---
-name: reviewer
-description: Read-only reviewer. Use after any non-trivial change.
+name: rex
+description: Code reviewer. Read-only. Use after any non-trivial change or when the user says "ask Rex".
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
@@ -58,7 +58,7 @@ behavior changes the author didn't intend. No style nits.
 
 Then in your main session:
 
-> Have the reviewer agent look at this branch.
+> Ask Rex to look at this branch.
 
 The subagent runs in its own context, with no memory of why the code was
 written that way. It comes back with findings. Your main session fixes them.
@@ -265,6 +265,8 @@ guard hook from earlier in this doc.
 - **Plans live on disk.** Conversations are ephemeral. Files aren't.
 - **Headless mode is a Unix tool.** Pipe into it. Pipe out of it. Alias it.
 
-That's the whole ladder. The people who get the most from Claude Code aren't
-the ones with the cleverest prompts. They're the ones who noticed what they
-kept repeating and automated it.
+The people who get the most from Claude Code aren't the ones with the
+cleverest prompts. They're the ones who noticed what they kept repeating and
+automated it.
+
+One more level: [build a whole company](04-your-ai-company.md).
