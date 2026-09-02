@@ -1,19 +1,18 @@
 # Claude Code Best Practices, by level
 
-A short, practical guide to working well with Claude Code. Start at the
-beginner level, get comfortable, then move up. Each level builds on the one
-before it.
+Real situations, the exact prompt to type, and what happens next. No feature
+tours. Start at the beginner level, get comfortable, then move up.
 
 | Level | Read this | You will learn |
 |-------|-----------|----------------|
-| Beginner | [docs/01-beginner.md](docs/01-beginner.md) | Starting sessions, writing good prompts, `CLAUDE.md`, reviewing changes safely |
-| Advanced | [docs/02-advanced.md](docs/02-advanced.md) | Plan mode, test-first workflows, custom skills, permissions, MCP servers, worktrees |
-| Expert | [docs/03-expert.md](docs/03-expert.md) | Hooks, subagents, headless mode, CI automation, multi-Claude workflows |
+| Beginner | [docs/01-beginner.md](docs/01-beginner.md) | Understanding a new codebase, fixing a bug from a stack trace, adding a small feature, writing tests, untangling git, commit messages |
+| Intermediate | [docs/02-advanced.md](docs/02-advanced.md) | Refactoring safely with plan mode, test-first bug fixes, library migrations, self-review before PRs, matching a mockup, working from tickets, dependency upgrades, flaky tests |
+| Advanced | [docs/03-expert.md](docs/03-expert.md) | Hooks that enforce rules, reviewer subagents, Claude in your shell, auto-triaging issues in CI, parallel migrations, writer-vs-reviewer, multi-day plans, incident logs, unattended runs |
 
 ## This repo is a live example
 
-The `.claude/` folder here is not decoration. It is a working setup you can
-copy into your own project:
+Several scenarios in the advanced doc reference a real setup. It's in this
+repo, ready to copy into your own project:
 
 ```
 CLAUDE.md                      # project memory Claude reads on every session
@@ -31,9 +30,11 @@ Open this folder in a terminal, run `claude`, and try:
 
 Then ask: "use the reviewer agent to review docs/01-beginner.md".
 
-## Suggested learning path
+## How to use this
 
-1. Read the beginner doc and do the three exercises at the bottom.
-2. Spend a week using Claude Code daily. Come back for the advanced doc.
-3. Once you find yourself repeating the same instructions, read the expert
-   doc and automate them with hooks, skills, and subagents.
+1. Read the beginner doc. Next time you hit one of those situations, copy the
+   prompt instead of improvising.
+2. After a week or two of daily use, read the intermediate doc. The
+   situations there are what your work actually looks like.
+3. When you notice you're typing the same instructions over and over, read
+   the advanced doc and automate them.

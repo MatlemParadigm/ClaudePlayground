@@ -1,22 +1,17 @@
-# Level 3: Expert
+# Level 3: Advanced, real situations
 
-Goal: make Claude Code work for you while you are not typing. This is the fun
-part.
+At this level you're not just using Claude Code. You're building workflows
+around it, and letting it run while you do something else.
 
-## 1. Hooks: deterministic rules Claude cannot skip
+---
 
-A `CLAUDE.md` instruction is a request. A hook is a guarantee. Hooks are shell
-commands that run at fixed points in the session and live in `settings.json`.
+## "Claude keeps forgetting to run the formatter"
 
-| Event | Fires when | Typical use |
-|-------|------------|-------------|
-| `PreToolUse` | Before a tool runs | Block dangerous commands, require approval |
-| `PostToolUse` | After a tool succeeds | Auto-format the file that was just edited |
-| `Stop` | Claude finishes a turn | Run tests, desktop notification |
-| `Notification` | Claude needs your attention | Ping Slack, play a sound |
-| `SessionStart` | A session opens | Install deps, load env, print reminders |
+**Situation.** You've told it in `CLAUDE.md`. It does it most of the time.
+Most isn't enough.
 
-Auto-format every edited file:
+**Do this.** Instructions are requests. Hooks are guarantees. In
+`.claude/settings.json`:
 
 ```json
 {
@@ -33,135 +28,243 @@ Auto-format every edited file:
 }
 ```
 
-Block destructive Bash before it runs. A `PreToolUse` hook receives the tool
-call as JSON on stdin. Exit code 2 blocks the call and the stderr message is
-shown to Claude, so it can pick a different approach:
+Now every file Claude edits gets formatted, every time, without Claude
+having to remember.
 
-```bash
-#!/usr/bin/env bash
-cmd=$(jq -r '.tool_input.command // empty')
-if echo "$cmd" | grep -Eq 'rm -rf /|git push .*--force|DROP TABLE'; then
-  echo "Blocked by guard hook: $cmd" >&2
-  exit 2
-fi
-```
+**The same trick for safety.** A `PreToolUse` hook on `Bash` that exits with
+code 2 blocks the command and tells Claude why. This repo ships one at
+`.claude/hooks/guard.sh` that blocks force pushes and `rm -rf /`. Ask Claude
+to force-push something and watch it get refused and pick another route.
 
-This repo ships that exact hook in `.claude/hooks/guard.sh`, wired up in
-`.claude/settings.json`. Try asking Claude to force-push and watch it refuse.
+---
 
-## 2. Subagents: specialists with their own context
+## "I want a second opinion that isn't biased by the first"
 
-A subagent is a separate Claude with its own prompt, tool set, and context
-window. The main session delegates a task and gets back a summary, so the
-subagent's file dumps never pollute your conversation. Define one in
-`.claude/agents/<name>.md`:
+**Situation.** Claude wrote the feature. Asking the same session to review
+it is like asking someone to grade their own homework.
+
+**Do this.** Define a reviewer subagent in `.claude/agents/reviewer.md`:
 
 ```markdown
 ---
 name: reviewer
-description: Reviews code changes for bugs and risky patterns. Use after any non-trivial edit.
+description: Read-only reviewer. Use after any non-trivial change.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
-
-You are a senior reviewer. You never edit files. Read the diff, then report:
-1. Bugs that will ship if unfixed, with file and line.
-2. Anything that changes behavior the author probably did not intend.
-3. Nothing else. No style nits.
+You never edit files. Read the diff. Report only bugs that will ship and
+behavior changes the author didn't intend. No style nits.
 ```
 
-Because `description` says when to use it, Claude will delegate to it on its
-own. You can also ask directly: "have the reviewer agent look at this."
+Then in your main session:
 
-Patterns that pay off:
-- A **read-only researcher** with no `Edit` or `Write`, for safe exploration.
-- A **test runner** on a cheap model that just runs the suite and reports.
-- A **reviewer** that checks work before you look at it.
+> Have the reviewer agent look at this branch.
 
-## 3. Headless mode: Claude as a command-line tool
+The subagent runs in its own context, with no memory of why the code was
+written that way. It comes back with findings. Your main session fixes them.
 
-The `-p` flag runs one prompt and exits. Now Claude composes with everything
-else in your shell:
+**Why it works.** Separate context means genuine fresh eyes. Restricting
+tools means it can't "fix" things behind your back.
+
+---
+
+## "Commit messages, but I never want to write one again"
+
+**Situation.** You want Claude in your shell, not just in a chat.
+
+**Do this.** Headless mode with `-p` runs one prompt and exits:
 
 ```bash
-# One-off question with structured output
-claude -p "List every TODO in src/ as JSON with file and line" --output-format json
-
-# Pipe data in
-git diff main | claude -p "Write a conventional commit message for this diff"
-
-# Restrict tools and cap the run for safety
-claude -p "Fix the lint errors" --allowedTools "Edit,Bash(npm run lint:*)" --max-turns 10
+# in ~/.zshrc or ~/.bashrc
+gcm() {
+  git diff --cached | claude -p "Write a conventional commit message for this diff. First line under 70 chars. Output only the message." | git commit -F -
+}
 ```
 
-Use `--output-format stream-json` when another program needs to watch progress.
+Now `git add -A && gcm`. Other one-liners that earn their keep:
 
-## 4. Automate in CI
+```bash
+# Explain a failing CI log
+cat ci.log | claude -p "Why did this fail? One paragraph, then the fix."
 
-In GitHub Actions, the Claude Code action lets `@claude` in an issue or PR
-comment kick off a session that pushes a branch and opens a PR. For
-scheduled work, headless mode in a cron job is enough:
+# Turn a meeting transcript into tickets
+claude -p "Extract action items from @notes.md as a markdown checklist"
+
+# Structured output for scripts
+claude -p "List every TODO in src/ as JSON: [{file, line, text}]" --output-format json
+```
+
+**Why it works.** `-p` composes with pipes. Anything that produces text can
+feed Claude. Anything Claude produces can feed the next tool.
+
+---
+
+## "Triage new issues automatically"
+
+**Situation.** Twenty issues a day. Half are missing reproduction steps.
+
+**Do this.** In a GitHub Actions workflow triggered on `issues: opened`:
 
 ```yaml
-- name: Triage new issues
-  run: |
-    claude -p "Read issue #${{ github.event.issue.number }}, add the right labels, and ask one clarifying question if the report is incomplete." \
-      --allowedTools "mcp__github__*"
+- run: |
+    claude -p "Read issue #${{ github.event.issue.number }}. If it's missing
+    reproduction steps, version, or expected behavior, post one polite
+    comment asking for exactly what's missing. Otherwise add the labels
+    that fit from: bug, feature, docs, question." \
+      --allowedTools "mcp__github__*" --max-turns 8
   env:
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-For Claude Code on the web, add a `SessionStart` hook that installs your
-dependencies so tests and linters work inside the remote container.
+**Why it works.** Bounded task, bounded tools, bounded turns. Claude can't
+wander off and do something surprising. It does one useful thing per issue
+and stops.
 
-## 5. Multi-Claude workflows
+---
 
-One Claude writes, another checks. Because they do not share context, the
-second one has no attachment to the first one's choices.
+## "Big migration, no time, several machines worth of work"
 
-**Writer and reviewer.** Terminal A: "implement the feature." Terminal B, in
-a separate worktree: "review the diff on branch X against the requirements
-in issue 42. Be adversarial." Feed B's findings back to A.
+**Situation.** Twelve packages, same mechanical change in each, a day of
+work if done serially.
 
-**Fan-out.** Split a migration into independent chunks, one worktree per
-chunk, one headless run per worktree, then merge:
+**Do this.** One worktree per package, one headless Claude per worktree, all
+in parallel:
 
 ```bash
-for pkg in api web worker; do
-  (cd "wt-$pkg" && claude -p "Migrate $pkg from moment to date-fns. Run its tests." --max-turns 30) &
+for pkg in api web worker billing auth search; do
+  git worktree add "../wt-$pkg" -b "migrate-$pkg"
+  (
+    cd "../wt-$pkg" &&
+    claude -p "In packages/$pkg, replace every use of the old Logger class with
+      the structured logger from @acme/log. Run this package's tests. Commit
+      when green." --max-turns 40 --allowedTools "Edit,Read,Bash(npm test:*),Bash(git:*)"
+  ) &
 done
 wait
 ```
 
-**Scratchpad handoff.** Ask Claude to write a plan to `PLAN.md`, `/clear`,
-then start a fresh session with "execute PLAN.md step by step, checking off
-each item." The plan survives, the noise does not.
+Come back in twenty minutes. Review six branches. Merge the good ones, rerun
+the bad ones with a sharper prompt.
 
-## 6. Get more thinking when it counts
+**Why it works.** Worktrees isolate the file systems. Headless mode means no
+one has to babysit six terminals.
 
-For hard design questions, tell Claude to think harder. The phrase
-`ultrathink` in your prompt allocates the largest reasoning budget. Save it
-for architecture decisions and gnarly debugging, not for renaming variables.
+---
 
-## 7. Safe autonomy
+## "Writer and reviewer, adversarial"
 
-`--dangerously-skip-permissions` turns off every prompt. It is great for
-long, boring, well-specified tasks such as fixing hundreds of lint errors.
-Only use it inside a container or VM with no credentials and no network
-access you care about. Pair it with the guard hook above and `--max-turns`.
+**Situation.** Critical feature. You want it built and attacked by different
+Claudes.
 
-## 8. Custom status line
+**Do this.** Terminal A, in the main checkout:
 
-Show branch, model, and context usage at the bottom of the terminal. Run
-`/statusline` and describe what you want. Claude writes the script for you.
+> Implement the rate limiter described in docs/rate-limit-spec.md. Write
+> tests as you go. Commit when done.
 
-## Exercises
+Terminal B, in a separate worktree on the same branch:
 
-1. Add a `PostToolUse` hook that runs your formatter. Confirm it fires.
-2. Create a read-only reviewer subagent and have it review your last commit.
-3. Write a shell alias that pipes `git diff` into `claude -p` for commit
-   messages. Use it for a day.
-4. Run two Claude sessions in two worktrees on two unrelated tickets at once.
+> Read docs/rate-limit-spec.md, then review the implementation on this
+> branch adversarially. Try to find inputs that violate the spec. Write
+> failing tests for anything you find. Don't fix the code.
 
-You now know more about Claude Code than most people who use it daily. Go
-build something.
+Take B's failing tests back to A:
+
+> The reviewer found these failures. Fix the implementation. Don't change
+> their tests.
+
+Repeat until B finds nothing.
+
+**Why it works.** A and B share no context. B has no idea what A was
+thinking and no reason to be charitable.
+
+---
+
+## "This is too big for one session"
+
+**Situation.** Multi-day feature. Context fills up. Sessions end. You keep
+re-explaining.
+
+**Do this.** Make the plan a file, not a conversation:
+
+> Write a detailed implementation plan for the new billing engine to
+> PLAN.md. Numbered steps, each one independently testable, with a checkbox.
+> Don't implement anything.
+
+Review and edit `PLAN.md` by hand. Then, in a fresh session (`/clear`):
+
+> Read PLAN.md. Do the next unchecked step. Run tests. Check it off, commit,
+> and stop.
+
+Repeat. Each session starts clean and knows exactly where it is.
+
+**Why it works.** The plan lives on disk and survives context limits,
+laptop reboots, and weekends. Each session does one thing well.
+
+---
+
+## "Something is on fire and I have logs"
+
+**Situation.** 3 a.m. page. 2 GB of logs. You need to know what changed.
+
+**Type this:**
+
+> Here are the last 5,000 lines of app logs (@logs/app.log). Errors started
+> around 02:40. Correlate with git log since yesterday and the deploy times
+> in @deploys.txt. What's the most likely cause? Give me a rollback command
+> and a forward-fix option. Don't run anything.
+
+**Why it works.** Cross-referencing logs, commits, and deploy times is
+tedious for humans and trivial for Claude. "Don't run anything" because it's
+3 a.m. and you want to be the one who pushes the button.
+
+---
+
+## "Hard design decision, I want it to really think"
+
+**Situation.** Event sourcing vs. CRUD for a new subsystem. You'll live with
+this for years.
+
+**Type this:**
+
+> ultrathink. We're deciding between event sourcing and a conventional CRUD
+> model for the new inventory service. Read docs/inventory-requirements.md
+> and the existing order service for context. Argue both sides seriously,
+> then recommend one, with the two things that would change your mind.
+
+**Why it works.** `ultrathink` gives Claude the largest reasoning budget.
+Spend it on decisions that are expensive to reverse, not on renames.
+
+---
+
+## "Let it run unattended, safely"
+
+**Situation.** 400 lint errors. Zero judgment required. You don't want to
+click approve 400 times.
+
+**Do this.** Inside a container or VM with no credentials you care about:
+
+```bash
+claude --dangerously-skip-permissions -p "Fix every lint error reported by
+  npm run lint. Don't change behavior. Run tests at the end." --max-turns 100
+```
+
+**Why it works.** Boring, well-specified, easily verified by the test suite.
+The container is the safety net, plus `--max-turns` as a hard stop and the
+guard hook from earlier in this doc.
+
+---
+
+## Habits at this level
+
+- **Anything you've told Claude three times becomes a skill, a hook, or a
+  line in `CLAUDE.md`.** In that order of preference: hooks for musts,
+  skills for repeated prompts, memory for context.
+- **Separate context for separate roles.** Writer, reviewer, researcher.
+  Subagents or worktrees.
+- **Bound every unattended run.** Allowed tools, max turns, a sandbox.
+- **Plans live on disk.** Conversations are ephemeral. Files aren't.
+- **Headless mode is a Unix tool.** Pipe into it. Pipe out of it. Alias it.
+
+That's the whole ladder. The people who get the most from Claude Code aren't
+the ones with the cleverest prompts. They're the ones who noticed what they
+kept repeating and automated it.
